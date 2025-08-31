@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
+# Import required libraries
 import matplotlib.pyplot as plt
 from vllm import LLM,SamplingParams
 import numpy as np
@@ -10,11 +11,14 @@ from matplotlib.colors import LinearSegmentedColormap
 import pandas as pd
 import gc
 
+# Model path - only using Qwen model in this version
 model_path_qwen ="/gpfs/projects/bsc100/models/science/Qwen/Qwen2.5-7B-Instruct"
 
-params_explain = SamplingParams(temperature = 0.8, max_tokens = 1000)
-params_extract = SamplingParams(temperature = 0.3, max_tokens = 50)
+# Sampling parameters for different response types
+params_explain = SamplingParams(temperature = 0.8, max_tokens = 1000)  # Creative reasoning responses
+params_extract = SamplingParams(temperature = 0.3, max_tokens = 50)    # Precise extraction tasks
 
+# Structured reasoning steps to guide the LLM's decision-making process
 steps = """
 1. There are four possible outcomes in this game, depending on your choice (A or B) and the other player's choice (A or B).
 2. Group the outcomes based on your decision:
@@ -26,41 +30,60 @@ steps = """
 """
 
 def extract_choice(text):
-    
+    """
+    Extract A or B choice from LLM response text using regex
+    Returns: (choice, is_valid_extraction) tuple
+    """
+    # Remove all punctuation and clean the text
     text = re.sub(r'[^\w\s]', '', text.strip())
     
+    # Split into individual words
     words = text.split()
 
+    # Look for unambiguous choice - only A present or only B present
     if 'A' in words and 'B' not in words:
         return 'A', True
     elif 'B' in words and 'A' not in words:
         return 'B', True
     else:
-        return 'Unknown', False
+        return 'Unknown', False  # Ambiguous or unclear response
 
 def extract_good_bad(text):
-    
+    """
+    Extract quality assessment (good/bad) from validation response
+    Used to determine if the LLM's reasoning was logically sound
+    """
+    # Convert to lowercase and remove punctuation
     text = re.sub(r'[^\w\s]', '', text.lower().strip())
 
     words = text.split()
 
+    # Look for unambiguous quality assessment
     if 'good' in words and 'bad' not in words:
         return 'good'
     elif 'bad' in words and 'good' not in words:
         return 'bad'
     else:
-        return 'unknown'
+        return 'unknown'  # Unclear assessment
 
 def convert_messages_to_prompt_qwen(messages):
+    """
+    Convert standard message format to Qwen-specific chat template
+    Qwen uses <|im_start|> and <|im_end|> tags for role formatting
+    """
     prompt = ""
     for msg in messages:
         role = msg["role"]
         content = msg["content"]
         prompt += f"<|im_start|>{role}\n{content}<|im_end|>\n"
-    prompt += "<|im_start|>assistant\n"
+    prompt += "<|im_start|>assistant\n"  # Prepare for assistant response
     return prompt
 
 def save_matrix(matrix,name):
+    """
+    Save cooperation matrix as a heatmap visualization
+    X-axis: T values (temptation), Y-axis: S values (sucker's payoff)
+    """
     plt.figure(figsize=(6, 5))
     plt.imshow(matrix, extent=[5, 15, 0, 10], aspect='auto')
     plt.xlabel("T")
@@ -70,6 +93,10 @@ def save_matrix(matrix,name):
     plt.savefig(name+".png")
 
 def load_llm(model_path):
+    """
+    Initialize the LLM with specific configuration for inference
+    Using float16 precision and trusting remote code execution
+    """
     return LLM(
         model=model_path,
         dtype="float16",
@@ -77,7 +104,7 @@ def load_llm(model_path):
         download_dir=model_path
     )
 
-#Cleaner version, no time to prevent randomness, more appealing prize, simultaneity, randomness
+# Game instructions emphasizing key experimental controls
 instructions_script_short = """
         This one-shot game, is made of only one round with an anonymous player. You will play only once.
 
@@ -105,19 +132,20 @@ instructions_script_short = """
 
         """
 
-#Initiate variables
-S = np.arange(0,11) #s values
-T = np.arange(5,16) #t values
-S_harmony = np.arange(6,11)
-T_harmony = np.arange(5,10)
-game_matrix = np.zeros([11,11]) #11x11 matrix
+# Initialize parameter ranges for systematic game testing
+S = np.arange(0,11)     # Sucker's payoff: 0-10 points
+T = np.arange(5,16)     # Temptation payoff: 5-15 points  
+S_harmony = np.arange(6,11)    # Subset for harmony games (unused in this version)
+T_harmony = np.arange(5,10)    # Subset for harmony games (unused in this version)
+game_matrix = np.zeros([11,11]) # Results matrix: cooperation rates for each (S,T) combination
 
+# Generate all possible game configurations (121 total combinations)
+all_values_script_0 = []  # Version 0: A = cooperative choice
+game_order = []           # Track (s,t) parameter pairs for indexing
 
-#I have made a list with all the games
-all_values_script_0 = []
-game_order = []
 for s in S:
     for t in T:
+        # Standard payoff matrix format where A represents cooperation
         values_script = f"""
         If you choose A and the other player chooses A. You earn 10 points, the other player earns 10 points.
         If you choose A and the other player chooses B. You earn {s} points, the other player earns {t} points.
@@ -127,9 +155,11 @@ for s in S:
         all_values_script_0.append(values_script)
         game_order.append([s,t])
 
-all_values_script_1 = []
+# Create alternative version with A/B labels swapped to control for labeling bias
+all_values_script_1 = []  # Version 1: B = cooperative choice
 for s in S:
     for t in T:
+        # Swapped format where B now represents cooperation
         values_script = f"""
         If you choose B and the other player chooses B. You earn 10 points, the other player earns 10 points.
         If you choose B and the other player chooses A. You earn {s} points, the other player earns {t} points.
@@ -137,37 +167,44 @@ for s in S:
         If you choose A and the other player chooses A. You earn 5 points, the other player earns 5 points.
         """
         all_values_script_1.append(values_script)
+
+# Load the LLM once (more efficient than the original multi-model approach)
 llm = load_llm(model_path_qwen)
 
-repetitions =  1
+# Experimental parameters
+repetitions = 1  # Number of complete runs (reduced from 10 in original)
 
+# Main experimental loop
 for rep in range(repetitions):
-
-    condition = False
-
-    condition_ignore_log = False
-
-    games_to_play =  [x for x in range(121)]
-
-    iter_loop = 0
-
+    
+    # Loop control variables
+    condition = False              # Main termination condition
+    condition_ignore_log = False   # Skip quality checking if progress stalls
+    games_to_play = [x for x in range(121)]  # All 121 game configurations
+    iter_loop = 0                  # Iteration counter for debugging
+    
+    # Continue until all games completed successfully
     while condition is False:
-
+        
+        # Progress tracking
         print('rep:', rep, 'games:', len(games_to_play), 'iter_logic:', iter_loop, 'condition:', condition_ignore_log)
-
-        long_answers = []
-        random_list = []
-
+        
+        # Storage for this iteration's responses
+        long_answers = []  # Detailed reasoning responses from LLM
+        random_list = []   # Track which version (0 or 1) was used per game
+        
         num_games = len(games_to_play)
-
+        
+        # Generate responses for all remaining games
         for game in games_to_play:
-
+            
+            # Randomly select version 0 or 1 to control for A/B labeling effects
             random_number = np.random.rand()
-
-            s = game_order[game][0] #s value of the iteration
-            t = game_order[game][1] #t value of the iteration
-
-             # What do you choose A or B? Give me an explanation
+            
+            s = game_order[game][0]  # Current sucker's payoff
+            t = game_order[game][1]  # Current temptation payoff
+            
+            # Use version 0 (A = cooperation) approximately 50% of the time
             if random_number <= 0.5:
                 random_list.append(1)
                 prompt1 = [
@@ -180,7 +217,7 @@ for rep in range(repetitions):
                 answer1 = outputs[0].outputs[0].text
                 long_answers.append(answer1)
 
-             # What do you choose A or B? Give me an explanation
+            # Use version 1 (B = cooperation) approximately 50% of the time  
             elif random_number > 0.5:
                 random_list.append(2)
                 prompt1 = [
@@ -193,26 +230,27 @@ for rep in range(repetitions):
                 answer1 = outputs[0].outputs[0].text
                 long_answers.append(answer1)
 
+        # Process each response: quality check and choice extraction
         games_to_play_copy = games_to_play.copy()
-
+        
         for ans_index in range(len(games_to_play)):
-
+            
             game = games_to_play[ans_index]
-
-            s = game_order[game][0] #s value of the iteration
-            t = game_order[game][1] #t value of the iteration
-
+            s = game_order[game][0]
+            t = game_order[game][1]
             answer1 = long_answers[ans_index]
-
-            quality = 'good'
-
+            quality = 'good'  # Default assumption
+            
+            # Quality checking phase (unless disabled due to lack of progress)
             if condition_ignore_log == False:
-
+                
+                # Determine which game version was used for this response
                 if random_list[ans_index] == 1:
                     points = all_values_script_0[game]
                 else:
                     points = all_values_script_1[game]
 
+                # Comprehensive quality validation prompt with detailed examples
                 message = f"""
                 You have to read the answer of Player 1 and output good or bad according to the following criteria:
 
@@ -292,8 +330,8 @@ for rep in range(repetitions):
                    - If you choose B: (B,B) gives you the lowest reward, and (B,A) gives a slightly higher reward, but still lower than all possible rewards when choosing A.
 
                 5. Based on this information, choosing A would result in a higher potential reward, making it the better choice.
-                Even though one might worry about the other player choice, it doesn’t make sense since the only possible outcome of choosing A is 10 points, which is the maximum. 
-                The other player choice isn’t going to affect your outcome at all, there is no risk.
+                Even though one might worry about the other player choice, it doesn't make sense since the only possible outcome of choosing A is 10 points, which is the maximum. 
+                The other player choice isn't going to affect your outcome at all, there is no risk.
 
                 Output of Example 2: good
 
@@ -405,6 +443,7 @@ for rep in range(repetitions):
                 - Do not add punctuation, extra spaces, or explanations.
                 """
 
+                # Submit quality check prompt to LLM
                 prompt3 = [
                 {"role": "system", "content": "You are a logical verifier. Your purpose is to check for inconsistencies and errors in a given text."},
                 {"role": "user", "content": message}]
@@ -412,10 +451,12 @@ for rep in range(repetitions):
                 prompt3_mod = convert_messages_to_prompt_qwen(prompt3)
                 outputs = llm.generate(prompt3_mod, params_extract)
                 answer3 = outputs[0].outputs[0].text
-                quality = extract_good_bad(answer3)
+                quality = extract_good_bad(answer3)  # Parse quality assessment
 
+            # Process response if quality is acceptable OR quality checking is disabled
             if (quality == 'good') or (condition_ignore_log == True):
 
+                # Extract the final choice (A or B) from the reasoning text
                 prompt2 = [
                     {"role": "system", "content": "You're a helpful assistant."},
                     {"role": "user", "content": "The player who was asked to choose between A and B answered " + answer1},
@@ -423,42 +464,47 @@ for rep in range(repetitions):
                 prompt2_mod = convert_messages_to_prompt_qwen(prompt2)
                 outputs = llm.generate(prompt2_mod, params_extract)
                 answer2 = outputs[0].outputs[0].text
-                choice, state = extract_choice(answer2)
+                choice, state = extract_choice(answer2)  # Parse extracted choice
 
-                if random_list[ans_index] == 1:
-
+                # Record result in cooperation matrix if extraction was successful
+                if random_list[ans_index] == 1:  # Version 0 was used (A = cooperation)
                     if state == True:
-
                         game_delete = games_to_play[ans_index]
-                        games_to_play_copy.remove(game_delete)
-
-                        if choice == 'A': #Turn answer into number and add it to a matrix
-                            game_matrix[10-s,t-5] += 1 
+                        games_to_play_copy.remove(game_delete)  # Mark as completed
+                        
+                        # Record cooperation (1) or defection (0)
+                        if choice == 'A':
+                            game_matrix[10-s,t-5] += 1  # A = cooperation in version 0
                         elif choice == 'B':
-                            game_matrix[10-s,t-5] += 0 
+                            game_matrix[10-s,t-5] += 0  # B = defection in version 0
 
-                elif random_list[ans_index] == 2:
-
+                elif random_list[ans_index] == 2:  # Version 1 was used (B = cooperation)
                     if state == True:
-
                         game_delete = games_to_play[ans_index]
-                        games_to_play_copy.remove(game_delete)
-
-                        if choice == 'A': #Turn answer into number and add it to a matrix
-                            game_matrix[10-s,t-5] += 0 
+                        games_to_play_copy.remove(game_delete)  # Mark as completed
+                        
+                        # Record with reversed mapping since A/B were swapped
+                        if choice == 'A':
+                            game_matrix[10-s,t-5] += 0  # A = defection in version 1
                         elif choice == 'B':
-                            game_matrix[10-s,t-5] += 1 
+                            game_matrix[10-s,t-5] += 1  # B = cooperation in version 1
 
+        # Update remaining games and check progress
         games_to_play = games_to_play_copy
         num_games_now = len(games_to_play)
 
+        # If no progress made this iteration, disable quality checking to avoid infinite loop
         if num_games_now == num_games:
             condition_ignore_log = True
 
+        # Check termination condition
         if games_to_play == []:
-            condition = True
+            condition = True  # All games completed
         else:
-            iter_loop += 1
+            iter_loop += 1    # Continue with remaining games
 
+# Convert raw cooperation counts to rates by dividing by repetitions
 game_matrix = game_matrix/repetitions
+
+# Save final cooperation matrix to text file
 np.savetxt('qwen10rep_final.txt', game_matrix, fmt = '%.2f')
