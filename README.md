@@ -9,4 +9,4 @@ Code used for my master thesis. Each program can be used to play 121 dyadic game
 | Plots.ipynb   |      Code for the plots               |
 | Nash.ipynb   |     Code for getting Nash equilibrium of all games                |
 
-For the plots I use theoretical matrices of phenotypes and human results of the experiment by Poncela-Casasnovas et al. (2016) *Humans display a reduced set of consistent behavioral phenotypes in dyadic games.* **Science Advances**.
+For the plots I use theoretical matrices of phenotypes and human results of the experiment by Poncela-Casasnovas et al. (2016) *Humans display a reduced set of consistent behavioral phenotypes in dyadic games.
