@@ -580,5 +580,5 @@ game_matrix = game_matrix/repetitions
 sticking_matrix = sticking_matrix/repetitions
 
 # Save final cooperation matrix to text file
-np.savetxt('coperation1.txt', game_matrix, fmt = '%.2f')
+np.savetxt('cooperation1.txt', game_matrix, fmt = '%.2f')
 np.savetxt('sticking1.txt', sticking_matrix, fmt = '%.2f')
