@@ -6,7 +6,6 @@ The code can be used to play dyadic games with enhanced prompting techniques, in
 | data   | Matrices needed to recreate the plots                  |
 | Llama_Mistral_finalversion.py   |  Play games with Llama or Mistral                  |
 | Qwen_finalversion.py  |  Play games with Qwen                |
-| Plots.ipynb   |      Code for the plots               |
 | Nash.ipynb   |     Code for getting Nash equilibrium cooperation                |
 
 ## Data Files
